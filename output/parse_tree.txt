@@ -168,17 +168,3 @@
 			programme
 			|
 			
-
-																	
-																mag_1
-																|
-																
-															rvalue_1
-															|
-															
-										stmtList
-										|
-										
-			programme
-			|
-			

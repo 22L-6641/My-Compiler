@@ -2,8 +2,7 @@
 #define LEXER_HPP
 
 #include <iostream>
-#include <unistd.h>
-#include <fcntl.h>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -13,6 +12,8 @@
 #include <cctype>
 #include <optional>
 #include <ctime>
+#include <cstdint>
+#include <cstddef>
 
 #define BUFFER_SIZE 25
 #define __EOF__ '\0'
@@ -20,7 +21,7 @@
 const std::string ROLL_NO = "22L-6895_";
 
 /*state to integer maping*/
-enum STATE : u_int8_t {
+enum STATE : std::uint8_t {
     ERROR_STATE,
     START,
     N1,
@@ -75,13 +76,13 @@ std::string tokenClassToString(TOKEN_CLASS token);
 std::string dataTypeToString(DATA_TYPE type);
 
 struct TOKEN {
-    ssize_t t_id;
+    std::ptrdiff_t t_id;
     std::optional<std::string> t_lexeme;
     TOKEN_CLASS t_class;
     int line_number;
     int column_number;
 
-    TOKEN(ssize_t id=-1, const std::optional<std::string>& lexeme = std::nullopt, TOKEN_CLASS tclass = TOKEN_CLASS::ERROR, int line = 0, int column = 0);
+    TOKEN(std::ptrdiff_t id=-1, const std::optional<std::string>& lexeme = std::nullopt, TOKEN_CLASS tclass = TOKEN_CLASS::ERROR, int line = 0, int column = 0);
     std::string toString() const;
 };
 
@@ -182,12 +183,12 @@ public:
 
 class BUFFER {
 private:
-    int in_file_descriptor;  
+    std::ifstream in_file;
     char buffer[2][BUFFER_SIZE+1];
     int buffer_in_use;  // 0 or 1, to track active buffer
     int bp, fp; 
     int current_lexeme_size = 0;
-    ssize_t current_buffer_size; 
+    std::streamsize current_buffer_size; 
 
     bool loadBuffer();
 

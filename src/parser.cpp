@@ -1,12 +1,18 @@
 #include "parser.hpp"
 #include <iostream>
 #include <cstdlib>
-#include <fcntl.h>
-#include <unistd.h>
+
+bool Parser::hasErrors() const {
+    return error_count > 0;
+}
+
+int Parser::getErrorCount() const {
+    return error_count;
+}
 
 Parser::Parser(std::vector<TOKEN> _tokens) : tokens(std::move(_tokens)), index(0), depth(0), next_line(false) {
-    parse_tree_fd = open((parse_tree_directory + "/" + parse_tree_filename).c_str(), O_CREAT | O_WRONLY, 0644);
-    if (parse_tree_fd == -1) {
+    parse_tree_out.open(parse_tree_directory + "/" + parse_tree_filename, std::ios::out | std::ios::trunc);
+    if (!parse_tree_out.is_open()) {
         std::cerr << "Parser:Parser() unable to open parse tree file\n";
     }
 }
@@ -26,6 +32,10 @@ bool Parser::drawInEnd() {
 }
 
 void Parser::write(const std::string& node_name) {
+    if (!parse_tree_out.is_open()) {
+        return;
+    }
+
     std::string line;
     for (int i = 0; i < depth; ++i) line += '\t';
     if (!node_name.empty()) {
@@ -35,7 +45,7 @@ void Parser::write(const std::string& node_name) {
     } else {
         line += "\n";
     }
-    ::write(parse_tree_fd, line.c_str(), line.size());
+    parse_tree_out << line;
 }
 
 TOKEN Parser::peek() {
@@ -45,21 +55,64 @@ TOKEN Parser::peek() {
     return tokens[index];
 }
 
-void Parser::match(const std::string& lexeme) {
-    if (peek().t_lexeme == lexeme) {
+bool Parser::checkLexeme(const std::string& lexeme) {
+    return peek().t_lexeme.has_value() && peek().t_lexeme.value() == lexeme;
+}
+
+bool Parser::isTypeStart() {
+    return checkLexeme("Adadi") || checkLexeme("Ashriya") || checkLexeme("Harf") || checkLexeme("Mantiqi") ||
+           checkLexeme("Matn") || checkLexeme("Khali");
+}
+
+bool Parser::isIdentifierLike() {
+    return peek().t_class == Identifier || checkLexeme("Marqazi");
+}
+
+void Parser::advance() {
+    if (index < tokens.size()) {
         ++index;
-    } else {
-        std::cerr << "[PARSE ERROR] Expected '" << lexeme << "' at line " << peek().line_number << "\n";
-        exit(EXIT_FAILURE);
     }
 }
 
-void Parser::match(TOKEN_CLASS cls) {
-    if (peek().t_class == cls) {
-        ++index;
+void Parser::reportError(const std::string& message) {
+    ++error_count;
+    std::cerr << "[PARSE ERROR] " << message << " at line " << peek().line_number << "\n";
+}
+
+void Parser::syncTo(std::initializer_list<std::string> lexemes) {
+    while (peek().t_class != T_EOF) {
+        for (const auto& lexeme : lexemes) {
+            if (checkLexeme(lexeme)) {
+                return;
+            }
+        }
+        advance();
+    }
+}
+
+bool Parser::match(const std::string& lexeme) {
+    if (peek().t_lexeme == lexeme) {
+        advance();
+        return true;
     } else {
-        std::cerr << "[PARSE ERROR] Expected token class at line " << peek().line_number << "\n";
-        exit(EXIT_FAILURE);
+        reportError("Expected '" + lexeme + "'");
+        if (peek().t_class != T_EOF) {
+            advance();
+        }
+        return false;
+    }
+}
+
+bool Parser::match(TOKEN_CLASS cls) {
+    if (peek().t_class == cls) {
+        advance();
+        return true;
+    } else {
+        reportError("Expected token class");
+        if (peek().t_class != T_EOF) {
+            advance();
+        }
+        return false;
     }
 }
 
@@ -68,37 +121,54 @@ void Parser::match(TOKEN_CLASS cls) {
 void Parser::programme() {
     drawInStart("programme");
     if (peek().t_class != T_EOF) {
-        type(); identifier(); programme_1();
+        if (!isTypeStart()) {
+            reportError("Expected type at programme start");
+            syncTo({"Adadi", "Ashriya", "Harf", "Mantiqi", "Matn", "Khali", "::", "("});
+        }
+
+        if (isTypeStart()) {
+            type();
+            if (isIdentifierLike()) {
+                identifier();
+            } else {
+                reportError("Expected identifier after type");
+                syncTo({"(", "::", "Adadi", "Ashriya", "Harf", "Mantiqi", "Matn", "Khali", "}"});
+            }
+            programme_1();
+        }
     }
     drawInEnd();
 }
 
 void Parser::programme_1() {
     drawInStart("programme_1");
-    if (peek().t_lexeme == "(") {
+    if (checkLexeme("(")) {
         match("("); argList(); match(")"); compStmt(); programme();
-    } else if (peek().t_lexeme == "::") {
+    } else if (checkLexeme("::")) {
         match("::"); programme();
+    } else if (peek().t_class != T_EOF) {
+        reportError("Expected '(' or '::' after function identifier");
+        syncTo({"::", "Adadi", "Ashriya", "Harf", "Mantiqi", "Matn", "Khali", "}"});
     }
     drawInEnd();
 }
 
 void Parser::type() {
     drawInStart("type");
-    if (peek().t_lexeme == "Adadi" || peek().t_lexeme == "Ashriya" || peek().t_lexeme == "Harf" || peek().t_lexeme == "Mantiqi") {
-        ++index;
+    if (isTypeStart()) {
+        advance();
     } else {
-        std::cerr << "[PARSE ERROR] Expected type at line " << peek().line_number << "\n";
-        exit(EXIT_FAILURE);
+        reportError("Expected type");
+        syncTo({"Adadi", "Ashriya", "Harf", "Mantiqi", "Matn", "Khali", "::", ",", ")", "}"});
     }
     drawInEnd();
 }
 
 void Parser::argList() {
     drawInStart("argList");
-    if (peek().t_lexeme == "Adadi" || peek().t_lexeme == "Ashriya" || peek().t_lexeme == "Harf" || peek().t_lexeme == "Mantiqi") {
+    if (isTypeStart()) {
         type(); identifier();
-        if (peek().t_lexeme == ",") {
+        if (checkLexeme(",")) {
             match(","); argList();
         }
     }
@@ -107,9 +177,21 @@ void Parser::argList() {
 
 void Parser::declaration() {
     drawInStart("declaration");
+    if (!isTypeStart()) {
+        reportError("Expected type in declaration");
+        syncTo({"::", "}", "Wagarna"});
+        drawInEnd();
+        return;
+    }
     type(); identifier();
-    while (peek().t_lexeme == ",") {
+    if (checkLexeme("=") || checkLexeme(":=")) {
+        match(peek().t_lexeme.value()); expr();
+    }
+    while (checkLexeme(",")) {
         match(","); identifier();
+        if (checkLexeme("=") || checkLexeme(":=")) {
+            match(peek().t_lexeme.value()); expr();
+        }
     }
     match("::");
     drawInEnd();
@@ -117,23 +199,32 @@ void Parser::declaration() {
 
 void Parser::stmt() {
     drawInStart("stmt");
-    if (peek().t_lexeme == "Agar") ifStmt();
+    if (checkLexeme("Agar")) ifStmt();
     else noIfStmt();
     drawInEnd();
 }
 
 void Parser::noIfStmt() {
     drawInStart("noIfStmt");
-    if (peek().t_lexeme == "for") forStmt();
-    else if (peek().t_lexeme == "while") whileStmt();
-    else if (peek().t_lexeme == "{") compStmt();
-    else if (peek().t_lexeme == "Wapas") returnStmt();
-    else if (peek().t_class == Keyword) declaration();
-    else if (peek().t_class == Identifier) { expr(); match("::"); }
-    else if (peek().t_lexeme == "::") match("::");
+    if (checkLexeme("for")) forStmt();
+    else if (checkLexeme("while")) whileStmt();
+    else if (checkLexeme("{")) compStmt();
+    else if (checkLexeme("Wapas")) returnStmt();
+    else if (checkLexeme("output<-") || checkLexeme("input->")) ioStmt();
+    else if (isTypeStart()) declaration();
+    else if (isIdentifierLike()) { expr(); match("::"); }
+    else if (checkLexeme("::")) match("::");
     else {
-        std::cerr << "[PARSE ERROR] Invalid statement at line " << peek().line_number << "\n";
-        exit(EXIT_FAILURE);
+        reportError("Invalid statement");
+        syncTo({"::", "}", "Wagarna", "Agar", "for", "while", "{"});
+        if (checkLexeme("::")) {
+            match("::");
+        } else if (checkLexeme("Wagarna")) {
+            // Leave else marker for ifStmt/stmtList to handle.
+        } else if (peek().t_class != T_EOF && !checkLexeme("}")) {
+            // Guarantee forward progress during recovery.
+            advance();
+        }
     }
     drawInEnd();
 }
@@ -146,7 +237,8 @@ void Parser::forStmt() {
 
 void Parser::optExpr() {
     drawInStart("optExpr");
-    if (peek().t_class == Identifier) expr();
+    if (isIdentifierLike() || checkLexeme("(") || peek().t_class == Number || peek().t_class == String_Literal ||
+        checkLexeme("True") || checkLexeme("False")) expr();
     drawInEnd();
 }
 
@@ -160,7 +252,7 @@ void Parser::ifStmt() {
     drawInStart("ifStmt");
     match("Agar"); match("("); expr(); match(")");
     stmt();
-    if (peek().t_lexeme == "Wagarna"){
+    if (checkLexeme("Wagarna")){
         elsePart();
     }
     drawInEnd();
@@ -180,7 +272,7 @@ void Parser::compStmt() {
 
 void Parser::stmtList() {
     drawInStart("stmtList");
-    if (peek().t_lexeme != "}") {
+    if (!checkLexeme("}") && !checkLexeme("Wagarna") && peek().t_class != T_EOF) {
         stmt(); stmtList();
     }
     drawInEnd();
@@ -194,16 +286,20 @@ void Parser::returnStmt() {
 
 void Parser::expr() {
     drawInStart("expr");
-    if (peek().t_class == Identifier) {
+    if (isIdentifierLike()) {
         identifier(); expr_1();
+    } else if (peek().t_class == Number || peek().t_class == String_Literal || checkLexeme("True") || checkLexeme("False") || checkLexeme("(")) {
+        rvalue();
+    } else {
+        reportError("Invalid expression start");
+        syncTo({"::", ")", "}", "Wagarna", ","});
     }
-    else rvalue();
     drawInEnd();
 }
 
 void Parser::expr_1() {
     drawInStart("expr_1");
-    if (peek().t_lexeme == ":=") {
+    if (checkLexeme(":=")) {
         match(":="); expr();
     } else {
         rvalue_1();
@@ -219,9 +315,9 @@ void Parser::rvalue() {
 
 void Parser::rvalue_1() {
     drawInStart("rvalue_1");
-    if (peek().t_lexeme == "==" || peek().t_lexeme == "<" || peek().t_lexeme == ">" ||
-        peek().t_lexeme == "<=" || peek().t_lexeme == ">=" || peek().t_lexeme == "!=" ||
-        peek().t_lexeme == "<>") {
+    if (checkLexeme("==") || checkLexeme("<") || checkLexeme(">") ||
+        checkLexeme("<=") || checkLexeme(">=") || checkLexeme("!=") ||
+        checkLexeme("<>")) {
         compare(); mag(); rvalue_1();
     }
     drawInEnd();
@@ -235,7 +331,7 @@ void Parser::mag() {
 
 void Parser::mag_1() {
     drawInStart("mag_1");
-    if (peek().t_lexeme == "+" || peek().t_lexeme == "-") {
+    if (checkLexeme("+") || checkLexeme("-")) {
         match(peek().t_lexeme.value()); term(); mag_1();
     }
     drawInEnd();
@@ -249,7 +345,7 @@ void Parser::term() {
 
 void Parser::term_1() {
     drawInStart("term_1");
-    if (peek().t_lexeme == "*" || peek().t_lexeme == "/") {
+    if (checkLexeme("*") || checkLexeme("/")) {
         match(peek().t_lexeme.value()); factor(); term_1();
     }
     drawInEnd();
@@ -263,27 +359,64 @@ void Parser::compare() {
 
 void Parser::factor() {
     drawInStart("factor");
-    if (peek().t_lexeme == "(") {
+    if (checkLexeme("(")) {
         match("("); expr(); match(")");
-    } else if (peek().t_class == Identifier) {
+    } else if (isIdentifierLike()) {
         identifier();
-    } else if (peek().t_class == Number) {
+    } else if (peek().t_class == Number || peek().t_class == String_Literal || checkLexeme("True") || checkLexeme("False")) {
         number();
     } else {
-        std::cerr << "[PARSE ERROR] Invalid factor at line " << peek().line_number << "\n";
-        exit(EXIT_FAILURE);
+        reportError("Invalid factor");
+        syncTo({")", "::", "+", "-", "*", "/", "==", "<", ">", "<=", ">=", "!=", "<>", "}", "Wagarna"});
     }
     drawInEnd();
 }
 
 void Parser::identifier() {
     drawInStart("Identifier");
-    match(Identifier);
+    if (peek().t_class == Identifier) {
+        match(Identifier);
+    } else if (checkLexeme("Marqazi")) {
+        match("Marqazi");
+    } else {
+        reportError("Expected identifier");
+        if (peek().t_class != T_EOF) {
+            advance();
+        }
+    }
     drawInEnd();
 }
 
 void Parser::number() {
     drawInStart("Number");
-    match(Number);
+    if (peek().t_class == Number || peek().t_class == String_Literal) {
+        match(peek().t_class);
+    } else if (checkLexeme("True") || checkLexeme("False")) {
+        match(peek().t_lexeme.value());
+    } else {
+        reportError("Expected literal");
+        if (peek().t_class != T_EOF) {
+            advance();
+        }
+    }
+    drawInEnd();
+}
+
+void Parser::ioStmt() {
+    drawInStart("ioStmt");
+    if (checkLexeme("output<-")) {
+        match("output<-");
+        expr();
+        match("::");
+    } else if (checkLexeme("input->")) {
+        match("input->");
+        identifier();
+        match("::");
+    } else {
+        reportError("Expected input/output statement");
+        if (peek().t_class != T_EOF) {
+            advance();
+        }
+    }
     drawInEnd();
 }

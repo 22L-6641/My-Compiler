@@ -57,7 +57,7 @@ std::string dataTypeToString(DATA_TYPE type) {
     }
 }
 
-TOKEN::TOKEN(ssize_t id, const std::optional<std::string>& lexeme, TOKEN_CLASS tclass, int line, int column)
+TOKEN::TOKEN(std::ptrdiff_t id, const std::optional<std::string>& lexeme, TOKEN_CLASS tclass, int line, int column)
     : t_id(id), t_lexeme(lexeme), t_class(tclass), line_number(line), column_number(column) {}
 
 std::string TOKEN::toString() const {
@@ -81,9 +81,9 @@ std::string LITERAL_TABLE_ENTRY::toString() const {
 
 template <typename T>
 bool TABLE<T>::writeToFile(const std::string& filename) const {
-    int fd = open(filename.c_str(), O_CREAT|O_WRONLY, 0644);
+    std::ofstream out_file(filename, std::ios::out | std::ios::trunc);
 
-    if(fd == -1) {
+    if(!out_file.is_open()) {
         std::cerr << "TABLE:writeToFile() unable to open file\n";
         return false;
     }
@@ -92,15 +92,13 @@ bool TABLE<T>::writeToFile(const std::string& filename) const {
     std::string buffer;
     for(const auto& e : entries) { 
         buffer = std::to_string(i) + "\t" + e.toString() + "\n";
-        ssize_t bytes_written = write(fd, buffer.c_str(), buffer.size());
-        if (bytes_written == -1) {
+        out_file << buffer;
+        if (!out_file.good()) {
             std::cerr << "TABLE:writeToFile() unable to write to file\n";
-            close(fd);
             return false;
         }
         ++i;
     }
-    close(fd);
 
     return true;
 }
@@ -186,7 +184,7 @@ TOKEN_CLASS TRANSITION_TABLE::getTokenClass(STATE s) {
 }
 
 BUFFER::BUFFER(const char* filename)
-    : in_file_descriptor(-1), buffer_in_use(0), bp(0), fp(0), current_buffer_size(0) {
+    : buffer_in_use(0), bp(0), fp(0), current_buffer_size(0) {
     if (filename) {
         if (!setFile(filename)) {
             std::cerr << "Error opening file: " << filename << "\n";
@@ -195,8 +193,8 @@ BUFFER::BUFFER(const char* filename)
 }
 
 BUFFER::~BUFFER() {
-    if (in_file_descriptor >= 0) {
-        close(in_file_descriptor);
+    if (in_file.is_open()) {
+        in_file.close();
     }
 }
 
@@ -205,13 +203,9 @@ bool BUFFER::loadBuffer() {
         std::cerr << "FD for input buffer not set\n";
         return false;
     }
-    bool last_size_zero = current_buffer_size == 0;
 
-    current_buffer_size = read(in_file_descriptor, buffer[1-buffer_in_use], BUFFER_SIZE);
-    if (current_buffer_size == -1) {
-        std::cerr << "unable to load buffer\n";
-        return false;
-    }
+    in_file.read(buffer[1-buffer_in_use], BUFFER_SIZE);
+    current_buffer_size = in_file.gcount();
 
     buffer_in_use = 1 - buffer_in_use; // Swap buffers (0,1)
     fp = 0;
@@ -220,12 +214,16 @@ bool BUFFER::loadBuffer() {
 }
 
 bool BUFFER::setFile(const char* filename) {
-    in_file_descriptor = open(filename, O_RDONLY);
-    return in_file_descriptor != -1 && loadBuffer();
+    if (in_file.is_open()) {
+        in_file.close();
+    }
+    in_file.clear();
+    in_file.open(filename, std::ios::in | std::ios::binary);
+    return in_file.is_open() && loadBuffer();
 }
 
 bool BUFFER::isDescriptorSet() {
-    return in_file_descriptor >= 0;
+    return in_file.is_open();
 }
 
 char BUFFER::peekNextCharacter() {
@@ -471,10 +469,8 @@ bool Lexer::isEmpty() {
 }
 
 int Scanner(const char *filename) {
-    
-
-    int fd = open(filename, O_RDONLY);
-    if (fd == -1) {
+    std::ifstream in_file(filename, std::ios::in | std::ios::binary);
+    if (!in_file.is_open()) {
         std::cerr << "Error opening file: " << filename << "\n";
         return -1;
     }
@@ -482,13 +478,12 @@ int Scanner(const char *filename) {
     const int buffer_size = BUFFER_SIZE;
     char buffer[buffer_size];
     char out_buffer[buffer_size];
-    int bytes_read = 0;
+    std::streamsize bytes_read = 0;
 
     std::string scanned_filename = std::string(filename) + ".Meow";
-    int out_fd = open(scanned_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (out_fd == -1) {
+    std::ofstream out_file(scanned_filename, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out_file.is_open()) {
         std::cerr << "Error opening output file: " << scanned_filename << "\n";
-        close(fd);
         return -1;
     }
 
@@ -501,13 +496,18 @@ int Scanner(const char *filename) {
     bool last_space = false;
     bool last_comment = false;
 
-    while ((bytes_read = read(fd, buffer, buffer_size)) > 0) {
+    while (in_file.good()) {
+        in_file.read(buffer, buffer_size);
+        bytes_read = in_file.gcount();
+        if (bytes_read <= 0) {
+            break;
+        }
 
-        for (int i = 0; i < bytes_read; i++) {
+        for (int i = 0; i < static_cast<int>(bytes_read); i++) {
 
             // write in out file buffer is full
             if (out_file_index >= buffer_size) {
-                write(out_fd, out_buffer, out_file_index);
+                out_file.write(out_buffer, out_file_index);
                 out_file_index = 0;
             }
 
@@ -594,19 +594,17 @@ int Scanner(const char *filename) {
     }
 
     if (out_file_index > 0) {
-        write(out_fd, out_buffer, out_file_index);
+        out_file.write(out_buffer, out_file_index);
     }
 
-    close(fd);
-    close(out_fd);
     return 1;
 }
 
 
 bool writeTokenToFile(std::vector<TOKEN>& token_stream, std::string& filename) {
-    int fd = open(filename.c_str(), O_CREAT|O_WRONLY,0644);
+    std::ofstream out_file(filename, std::ios::out | std::ios::trunc);
 
-    if(fd == -1) {
+    if(!out_file.is_open()) {
         std::cerr << "writeTokenToFile() unable to open file\n";
         return false;
     }
@@ -615,15 +613,13 @@ bool writeTokenToFile(std::vector<TOKEN>& token_stream, std::string& filename) {
     std::string buffer;
     for(const auto& e:token_stream) { 
         buffer = std::to_string(i)+ "\t"+ e.toString() + "\n";
-        ssize_t bytes_written = write(fd, buffer.c_str(),buffer.size());
-        if (bytes_written == -1) {
+        out_file << buffer;
+        if (!out_file.good()) {
             std::cerr << "writeTokenToFile() unable to write to file\n";
-            close(fd);
             return false;
         }
         ++i;
     }
-    close(fd);
 
     return true;
 }

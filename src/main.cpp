@@ -64,5 +64,12 @@ int main(int argc, char* args[]) {
 
     parser.programme();
 
+    if (parser.hasErrors()) {
+        std::cerr << "Parsing completed with " << parser.getErrorCount() << " error(s) using panic-mode recovery.\n";
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Parsing completed successfully with 0 errors.\n";
+
     return EXIT_SUCCESS;    
 }
