@@ -27,144 +27,87 @@
 								Identifier
 								|
 								
+								Identifier
+								|
+								
+								Identifier
+								|
+								
+								Identifier
+								|
+								
+								Identifier
+								|
+								
+								Identifier
+								|
+								
 					stmtList
 					|
 						stmt
 						|
 							noIfStmt
 							|
-								declaration
+								expr
 								|
-									type
-									|
-									
 									Identifier
 									|
 									
-						stmtList
-						|
-							stmt
-							|
-								noIfStmt
-								|
-									declaration
+									expr
 									|
-										type
-										|
-										
 										Identifier
 										|
 										
-							stmtList
-							|
-								stmt
-								|
-									ifStmt
-									|
-										expr
+										term_1
 										|
-											Identifier
-											|
-											
-											expr_1
-											|
-												rvalue_1
-												|
-												
-										stmt
+										
+										mag_1
 										|
-											ifStmt
+											term
 											|
-												expr
+												factor
 												|
 													Identifier
 													|
 													
-													expr_1
+												term_1
+												|
+													factor
 													|
-														rvalue_1
+														Identifier
 														|
 														
-												stmt
-												|
-													noIfStmt
+													term_1
 													|
-														declaration
+													
+											mag_1
+											|
+												term
+												|
+													factor
+													|
+														Identifier
 														|
-															type
-															|
-															
+														
+													term_1
+													|
+														factor
+														|
 															Identifier
 															|
 															
-												elsePart
-												|
-													stmt
-													|
-														noIfStmt
-														|
-															expr
-															|
-																Identifier
-																|
-																
-																expr_1
-																|
-																	expr
-																	|
-																		rvalue
-																		|
-																			mag
-																			|
-																				term
-																				|
-																					factor
-																					|
-																						Number
-																						|
-																						
-																					term_1
-																					|
-																					
-																				mag_1
-																				|
-																				
-																			rvalue_1
-																			|
-																			
-								stmtList
-								|
-									stmt
-									|
-										noIfStmt
-										|
-											returnStmt
-											|
-												expr
-												|
-													rvalue
-													|
-														mag
-														|
-															term
-															|
-																factor
-																|
-																	Number
-																	|
-																	
-																term_1
-																|
-																
-															mag_1
-															|
-															
-														rvalue_1
+														term_1
 														|
 														
-									stmtList
-									|
-									
+												mag_1
+												|
+												
+										rvalue_1
+										|
+										
+						stmtList
+						|
+						
 			programme
 			|
 			

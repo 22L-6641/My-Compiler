@@ -5,13 +5,14 @@
 #include <initializer_list>
 #include <fstream>
 #include "lexer.hpp"
+#include "tac.hpp"
 
 
 
 
 class Parser {
 public:
-    Parser(std::vector<TOKEN>);
+    Parser(std::vector<TOKEN>, TACGenerator& tacgen);
     void programme();
     bool hasErrors() const;
     int getErrorCount() const;
@@ -43,6 +44,9 @@ private:
     bool drawInEnd();
     void write(const std::string&);
 
+    // TAC generator reference
+    TACGenerator& tac;
+
     void programme_1();
     void type();
     void argList();
@@ -57,18 +61,18 @@ private:
     void compStmt();
     void stmtList();
     void returnStmt();
-    void expr();
-    void expr_1();
-    void rvalue();
-    void rvalue_1();
-    void mag();
-    void mag_1();
-    void term();
-    void term_1();
+    std::string expr();
+    std::string expr_1();
+    std::string rvalue();
+    std::string rvalue_1(const std::string& left);
+    std::string mag();
+    std::string mag_1(const std::string& left);
+    std::string term();
+    std::string term_1(const std::string& left);
     void compare();
-    void factor();
-    void identifier();
-    void number();
+    std::string factor();
+    std::string identifier();
+    std::string number();
     void ioStmt();
     bool isIdentifierLike();
 };

@@ -1,0 +1,7 @@
+0	main, Identifier, T_DEFAULT
+1	a, Identifier, T_DEFAULT
+2	b, Identifier, T_DEFAULT
+3	c, Identifier, T_DEFAULT
+4	d, Identifier, T_DEFAULT
+5	e, Identifier, T_DEFAULT
+6	f, Identifier, T_DEFAULT

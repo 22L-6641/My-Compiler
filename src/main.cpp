@@ -55,19 +55,23 @@ int main(int argc, char* args[]) {
  
 
     
-    symbol_table.writeToFile("output/symbol_table_"+ ROLL_NO +".txt");
-    literal_table.writeToFile("output/literal_table_" + ROLL_NO +".txt");
+    symbol_table.writeToFile("output/symbol_table.txt");
+    literal_table.writeToFile("output/literal_table.txt");
     std::cout << "----------Generated Lexer Output files---------\n";
 
     std::cout << "----------Parser----------\n";
-    Parser parser(token_stream);
+    TACGenerator tac;
+    Parser parser(token_stream, tac);
 
     parser.programme();
 
     if (parser.hasErrors()) {
-        std::cerr << "Parsing completed with " << parser.getErrorCount() << " error(s) using panic-mode recovery.\n";
+        std::cerr << "There was error while parsing.\n";
         return EXIT_FAILURE;
     }
+
+    // write TAC output
+    tac.writeToFile("output/three_address_code.txt");
 
     std::cout << "Parsing completed successfully with 0 errors.\n";
 

@@ -10,7 +10,7 @@ int Parser::getErrorCount() const {
     return error_count;
 }
 
-Parser::Parser(std::vector<TOKEN> _tokens) : tokens(std::move(_tokens)), index(0), depth(0), next_line(false) {
+Parser::Parser(std::vector<TOKEN> _tokens, TACGenerator& tacgen) : tokens(std::move(_tokens)), index(0), depth(0), next_line(false), tac(tacgen) {
     parse_tree_out.open(parse_tree_directory + "/" + parse_tree_filename, std::ios::out | std::ios::trunc);
     if (!parse_tree_out.is_open()) {
         std::cerr << "Parser:Parser() unable to open parse tree file\n";
@@ -231,29 +231,75 @@ void Parser::noIfStmt() {
 
 void Parser::forStmt() {
     drawInStart("forStmt");
-    match("for"); match("("); optExpr(); match("::"); optExpr(); match("::"); optExpr(); match(")"); stmt();
+    match("for"); match("(");
+    // init
+    if (!checkLexeme("::")) {
+        expr();
+    }
+    match("::");
+    // cond
+    std::string cond;
+    if (!checkLexeme("::")) {
+        cond = expr();
+    }
+    match("::");
+    // incr
+    std::streampos incr_pos; // not needed explicitly
+    std::string startLabel = tac.newLabel();
+    std::string endLabel = tac.newLabel();
+    tac.emitLabel(startLabel);
+    if (!cond.empty()) {
+        tac.emitIfFalse(cond, endLabel);
+    }
+    match(")");
+    stmt();
+    // increment: attempt to parse an expression if present (best-effort)
+    // Note: original grammar allowed optExpr; here we won't reparse tokens after stmt.
+    tac.emit("goto", "", "", startLabel);
+    tac.emitLabel(endLabel);
     drawInEnd();
 }
 
 void Parser::optExpr() {
     drawInStart("optExpr");
     if (isIdentifierLike() || checkLexeme("(") || peek().t_class == Number || peek().t_class == String_Literal ||
-        checkLexeme("True") || checkLexeme("False")) expr();
+        checkLexeme("True") || checkLexeme("False")) {
+        expr();
+    }
     drawInEnd();
 }
 
 void Parser::whileStmt() {
     drawInStart("whileStmt");
-    match("while"); match("("); expr(); match(")"); stmt();
+    match("while"); match("(");
+    std::string start = tac.newLabel();
+    std::string end = tac.newLabel();
+    tac.emitLabel(start);
+    std::string cond = expr();
+    match(")");
+    tac.emitIfFalse(cond, end);
+    stmt();
+    tac.emit("goto", "", "", start);
+    tac.emitLabel(end);
     drawInEnd();
 }
 
 void Parser::ifStmt() {
     drawInStart("ifStmt");
-    match("Agar"); match("("); expr(); match(")");
+    match("Agar"); match("(");
+    std::string cond = expr();
+    match(")");
+    std::string elseLabel = tac.newLabel();
+    std::string endLabel = tac.newLabel();
+    tac.emitIfFalse(cond, elseLabel);
     stmt();
     if (checkLexeme("Wagarna")){
+        tac.emit("goto", "", "", endLabel);
+        tac.emitLabel(elseLabel);
         elsePart();
+        tac.emitLabel(endLabel);
+    } else {
+        tac.emitLabel(elseLabel);
     }
     drawInEnd();
 }
@@ -284,71 +330,122 @@ void Parser::returnStmt() {
     drawInEnd();
 }
 
-void Parser::expr() {
+std::string Parser::expr() {
     drawInStart("expr");
+    std::string result;
     if (isIdentifierLike()) {
-        identifier(); expr_1();
+        std::string id = identifier();
+        if (checkLexeme(":=")) {
+            match(":=");
+            std::string rhs = expr();
+            if (!rhs.empty()) tac.emitAssign(id, rhs);
+            result = id;
+        } else {
+            // Parse full precedence chain when expression starts with identifier.
+            std::string termRes = term_1(id);
+            std::string current = termRes.empty() ? id : termRes;
+
+            std::string magRes = mag_1(current);
+            current = magRes.empty() ? current : magRes;
+
+            std::string relRes = rvalue_1(current);
+            result = relRes.empty() ? current : relRes;
+        }
     } else if (peek().t_class == Number || peek().t_class == String_Literal || checkLexeme("True") || checkLexeme("False") || checkLexeme("(")) {
-        rvalue();
+        result = rvalue();
     } else {
         reportError("Invalid expression start");
         syncTo({"::", ")", "}", "Wagarna", ","});
     }
     drawInEnd();
+    return result;
 }
 
-void Parser::expr_1() {
+std::string Parser::expr_1() {
     drawInStart("expr_1");
+    std::string res;
     if (checkLexeme(":=")) {
-        match(":="); expr();
+        match(":=");
+        res = expr();
     } else {
-        rvalue_1();
+        res = rvalue();
     }
     drawInEnd();
+    return res;
 }
 
-void Parser::rvalue() {
+std::string Parser::rvalue() {
     drawInStart("rvalue");
-    mag(); rvalue_1();
+    std::string left = mag();
+    std::string res = rvalue_1(left);
     drawInEnd();
+    return res.empty() ? left : res;
 }
 
-void Parser::rvalue_1() {
+std::string Parser::rvalue_1(const std::string& left) {
     drawInStart("rvalue_1");
+    std::string res;
     if (checkLexeme("==") || checkLexeme("<") || checkLexeme(">") ||
         checkLexeme("<=") || checkLexeme(">=") || checkLexeme("!=") ||
         checkLexeme("<>")) {
-        compare(); mag(); rvalue_1();
+        std::string op = peek().t_lexeme.value();
+        compare();
+        std::string right = mag();
+        std::string temp = tac.newTemp();
+        tac.emit(op, left, right, temp);
+        res = rvalue_1(temp);
+        if (res.empty()) res = temp;
     }
     drawInEnd();
+    return res;
 }
 
-void Parser::mag() {
+std::string Parser::mag() {
     drawInStart("mag");
-    term(); mag_1();
+    std::string left = term();
+    std::string res = mag_1(left);
     drawInEnd();
+    return res.empty() ? left : res;
 }
 
-void Parser::mag_1() {
+std::string Parser::mag_1(const std::string& left) {
     drawInStart("mag_1");
+    std::string res;
     if (checkLexeme("+") || checkLexeme("-")) {
-        match(peek().t_lexeme.value()); term(); mag_1();
+        std::string op = peek().t_lexeme.value();
+        match(op);
+        std::string right = term();
+        std::string temp = tac.newTemp();
+        tac.emit(op, left, right, temp);
+        res = mag_1(temp);
+        if (res.empty()) res = temp;
     }
     drawInEnd();
+    return res;
 }
 
-void Parser::term() {
+std::string Parser::term() {
     drawInStart("term");
-    factor(); term_1();
+    std::string left = factor();
+    std::string res = term_1(left);
     drawInEnd();
+    return res.empty() ? left : res;
 }
 
-void Parser::term_1() {
+std::string Parser::term_1(const std::string& left) {
     drawInStart("term_1");
+    std::string res;
     if (checkLexeme("*") || checkLexeme("/")) {
-        match(peek().t_lexeme.value()); factor(); term_1();
+        std::string op = peek().t_lexeme.value();
+        match(op);
+        std::string right = factor();
+        std::string temp = tac.newTemp();
+        tac.emit(op, left, right, temp);
+        res = term_1(temp);
+        if (res.empty()) res = temp;
     }
     drawInEnd();
+    return res;
 }
 
 void Parser::compare() {
@@ -357,26 +454,33 @@ void Parser::compare() {
     drawInEnd();
 }
 
-void Parser::factor() {
+std::string Parser::factor() {
     drawInStart("factor");
+    std::string res;
     if (checkLexeme("(")) {
-        match("("); expr(); match(")");
+        match("(");
+        res = expr();
+        match(")");
     } else if (isIdentifierLike()) {
-        identifier();
+        res = identifier();
     } else if (peek().t_class == Number || peek().t_class == String_Literal || checkLexeme("True") || checkLexeme("False")) {
-        number();
+        res = number();
     } else {
         reportError("Invalid factor");
         syncTo({")", "::", "+", "-", "*", "/", "==", "<", ">", "<=", ">=", "!=", "<>", "}", "Wagarna"});
     }
     drawInEnd();
+    return res;
 }
 
-void Parser::identifier() {
+std::string Parser::identifier() {
     drawInStart("Identifier");
+    std::string name;
     if (peek().t_class == Identifier) {
+        if (peek().t_lexeme.has_value()) name = peek().t_lexeme.value();
         match(Identifier);
     } else if (checkLexeme("Marqazi")) {
+        name = "Marqazi";
         match("Marqazi");
     } else {
         reportError("Expected identifier");
@@ -385,13 +489,17 @@ void Parser::identifier() {
         }
     }
     drawInEnd();
+    return name;
 }
 
-void Parser::number() {
+std::string Parser::number() {
     drawInStart("Number");
+    std::string val;
     if (peek().t_class == Number || peek().t_class == String_Literal) {
+        if (peek().t_lexeme.has_value()) val = peek().t_lexeme.value();
         match(peek().t_class);
     } else if (checkLexeme("True") || checkLexeme("False")) {
+        if (peek().t_lexeme.has_value()) val = peek().t_lexeme.value();
         match(peek().t_lexeme.value());
     } else {
         reportError("Expected literal");
@@ -400,6 +508,7 @@ void Parser::number() {
         }
     }
     drawInEnd();
+    return val;
 }
 
 void Parser::ioStmt() {

@@ -18,7 +18,7 @@
 #define BUFFER_SIZE 25
 #define __EOF__ '\0'
 
-const std::string ROLL_NO = "22L-6895_";
+const std::string ROLL_NO = "";
 
 /*state to integer maping*/
 enum STATE : std::uint8_t {
